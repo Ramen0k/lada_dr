@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Batnorton — Колесо фортуны</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #0f0f14;
+    --card: #17171f;
+    --accent: #ff6b81;
+    --gold: #ffd15c;
+    --text: #f5f5f7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: radial-gradient(circle at top, #1c1c26, #0f0f14 70%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 24px 16px 40px;
+  }
+  h1 {
+    font-size: 22px;
+    margin: 8px 0 2px;
+    text-align: center;
+  }
+  .subtitle {
+    color: #a9a9b3;
+    font-size: 14px;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .wheel-wrap {
+    position: relative;
+    width: 300px;
+    height: 300px;
+    margin: 10px auto 24px;
+  }
+  .pointer {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 14px solid transparent;
+    border-right: 14px solid transparent;
+    border-top: 22px solid var(--gold);
+    z-index: 5;
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.4));
+  }
+  #wheel {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    display: block;
+    box-shadow: 0 0 0 8px #26262f, 0 10px 30px rgba(0,0,0,.5);
+    transition: transform 5s cubic-bezier(.17,.67,.16,1);
+  }
+  .hub {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 54px;
+    height: 54px;
+    background: var(--gold);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    box-shadow: 0 0 0 4px #0f0f14;
+    z-index: 4;
+  }
+  button#spin {
+    background: linear-gradient(135deg, var(--accent), #ff4757);
+    color: white;
+    border: none;
+    font-size: 17px;
+    font-weight: 600;
+    padding: 14px 40px;
+    border-radius: 30px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px rgba(255,71,87,.35);
+    transition: transform .15s ease, opacity .3s ease;
+  }
+  button#spin:active { transform: scale(0.96); }
+  button#spin:disabled { opacity: .5; cursor: default; }
+
+  .result-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,10,14,.92);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    text-align: center;
+    padding: 24px;
+    z-index: 50;
+    animation: fadeIn .4s ease forwards;
+  }
+  .result-overlay.show { display: flex; }
+  .result-card {
+    background: var(--card);
+    border-radius: 20px;
+    padding: 32px 24px;
+    max-width: 320px;
+    box-shadow: 0 20px 50px rgba(0,0,0,.5);
+  }
+  .result-emoji { font-size: 54px; margin-bottom: 10px; }
+  .result-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--gold);
+  }
+  .result-text {
+    color: #cfcfd6;
+    font-size: 15px;
+    line-height: 1.5;
+    margin-bottom: 22px;
+  }
+  .result-btn {
+    background: var(--gold);
+    color: #1a1a1a;
+    border: none;
+    font-weight: 700;
+    padding: 12px 28px;
+    border-radius: 24px;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .confetti {
+    position: fixed;
+    width: 8px;
+    height: 8px;
+    top: -10px;
+    z-index: 60;
+    border-radius: 2px;
+  }
+</style>
+</head>
+<body>
+
+<h1>🎁 Колесо фортуны Batnorton</h1>
+<div class="subtitle">Специально для тебя — крути и забирай приз!</div>
+
+<div class="wheel-wrap">
+  <div class="pointer"></div>
+  <canvas id="wheel" width="600" height="600"></canvas>
+  <div class="hub">🎀</div>
+</div>
+
+<button id="spin">Крутить</button>
+
+<div class="result-overlay" id="overlay">
+  <div class="result-card">
+    <div class="result-emoji">💳🎉</div>
+    <div class="result-title">Подарочная карта!</div>
+    <div class="result-text" id="result-text">
+      С днём рождения, любовь моя! 🥳<br><br>
+      Это не просто карта — это твой подарок от меня.
+      Всё остальное расскажу лично 😉❤️
+    </div>
+    <button class="result-btn" onclick="closeOverlay()">Ура! 🎉</button>
+  </div>
+</div>
+
+<script>
+  const tg = window.Telegram?.WebApp;
+  if (tg) { tg.ready(); tg.expand(); }
+
+  // Призы на колесе. Порядок важен — соответствует секторам по кругу,
+  // начиная сверху (12 часов) по часовой стрелке.
+  const prizes = [
+    { label: "Скидка 20%", color: "#ff6b81" },
+    { label: "Шарф в подарок", color: "#ffd15c" },
+    { label: "Бесплатная доставка", color: "#6bc5ff" },
+    { label: "Подарочная карта", color: "#c56bff", isMain: true },
+    { label: "Худи в подарок", color: "#6bffb0" },
+    { label: "Скидка 10%", color: "#ff9d6b" },
+  ];
+
+  const segAngle = 360 / prizes.length;
+
+  // ---- Рисуем колесо на canvas ----
+  const canvas = document.getElementById('wheel');
+  const ctx = canvas.getContext('2d');
+  const R = canvas.width / 2;
+
+  function drawWheel() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    prizes.forEach((p, i) => {
+      const start = (i * segAngle - 90) * Math.PI / 180;
+      const end = ((i + 1) * segAngle - 90) * Math.PI / 180;
+
+      ctx.beginPath();
+      ctx.moveTo(R, R);
+      ctx.arc(R, R, R, start, end);
+      ctx.closePath();
+      ctx.fillStyle = p.color;
+      ctx.fill();
+
+      // текст
+      ctx.save();
+      ctx.translate(R, R);
+      ctx.rotate((start + end) / 2);
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#1a1a1a";
+      ctx.font = "bold 24px -apple-system, sans-serif";
+      ctx.fillText(p.label, R - 24, 8);
+      ctx.restore();
+    });
+  }
+  drawWheel();
+
+  // ---- Логика вращения ----
+  // Индекс приза, на который ГАРАНТИРОВАННО должно попасть колесо.
+  const GUARANTEED_INDEX = prizes.findIndex(p => p.isMain);
+
+  let spinning = false;
+  const spinBtn = document.getElementById('spin');
+  const overlay = document.getElementById('overlay');
+
+  spinBtn.addEventListener('click', () => {
+    if (spinning) return;
+    spinning = true;
+    spinBtn.disabled = true;
+    if (tg?.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+
+    // Угол центра нужного сектора
+    const targetCenter = GUARANTEED_INDEX * segAngle + segAngle / 2;
+    // Небольшой случайный сдвиг внутри сектора, чтобы не было "подозрительно" ровно
+    const jitter = (Math.random() - 0.5) * (segAngle * 0.5);
+    // Указатель смотрит вверх (0°), колесо рисуется от -90°,
+    // поэтому итоговый поворот считаем так, чтобы нужный сектор оказался под указателем
+    const fullSpins = 5 + Math.floor(Math.random() * 3); // 5-7 полных оборотов
+    const finalRotation = fullSpins * 360 + (360 - targetCenter - jitter);
+
+    const wheelEl = document.getElementById('wheel');
+    wheelEl.style.transform = `rotate(${finalRotation}deg)`;
+
+    setTimeout(() => {
+      spinning = false;
+      showResult();
+      if (tg?.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+      launchConfetti();
+    }, 5200);
+  });
+
+  function showResult() {
+    overlay.classList.add('show');
+  }
+  function closeOverlay() {
+    overlay.classList.remove('show');
+    // Если нужно сообщить боту результат:
+    // tg?.sendData(JSON.stringify({ prize: "gift_card" }));
+  }
+
+  function launchConfetti() {
+    const colors = ["#ff6b81", "#ffd15c", "#6bc5ff", "#c56bff", "#6bffb0"];
+    for (let i = 0; i < 60; i++) {
+      const el = document.createElement('div');
+      el.className = 'confetti';
+      el.style.left = Math.random() * 100 + 'vw';
+      el.style.background = colors[Math.floor(Math.random() * colors.length)];
+      el.style.transform = `rotate(${Math.random()*360}deg)`;
+      document.body.appendChild(el);
+      const duration = 2500 + Math.random() * 1500;
+      el.animate(
+        [
+          { transform: `translateY(0) rotate(0deg)`, opacity: 1 },
+          { transform: `translateY(100vh) rotate(${360 + Math.random()*360}deg)`, opacity: 0.9 }
+        ],
+        { duration, easing: 'ease-in' }
+      );
+      setTimeout(() => el.remove(), duration);
+    }
+  }
+</script>
+
+</body>
+</html>
